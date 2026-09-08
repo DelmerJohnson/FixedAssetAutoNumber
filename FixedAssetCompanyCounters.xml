@@ -1,0 +1,66 @@
+<CustomizationPlugin Name="FixedAssetCompanyCounters">
+  <Project Name="FixedAssetCompanyCounters" Descr="Automates Fixed Asset 2-10 Segmented Key numbering separated by Company" CustomizationLevel="0" MajorVersion="1" MinorVersion="0" ExportTime="2026-09-04T00:00:00">
+    <GraphExtension GraphName="PX.Objects.FA.AssetMaint" ExtName="AssetMaint_CompanyCounterExt" Active="True">
+      <TemplateCode><![CDATA[
+using PX.Data;
+using PX.Objects.FA;
+using PX.Objects.GL;
+
+namespace PX.Objects.FA
+{
+    public class AssetMaint_CompanyCounterExt : PXGraphExtension<AssetMaint>
+    {
+        public static bool IsActive() => true;
+
+        // Hooking RowPersisting guarantees the ID is generated right as the record commits to the DB
+        protected virtual void _(Events.RowPersisting<FixedAsset> e)
+        {
+            var row = e.Row;
+            if (row == null) return;
+
+            // Only trigger on initial insert when the system is expecting a new automated ID
+            if (e.Operation == PXDBOperation.Insert && (string.IsNullOrEmpty(row.AssetCD) || row.AssetCD.Trim() == "<NEW>"))
+            {
+                if (row.BranchID == null)
+                {
+                    throw new PXException("A Branch must be selected on the asset before generating the Asset ID.");
+                }
+
+                // Look up the Parent Company (Organization) CD based on the selected Branch ID
+                Organization organization = PXSelectJoin<Organization,
+                    InnerJoin<Branch, On<Branch.organizationID, Equal<Organization.organizationID>>>,
+                    Where<Branch.branchID, Equal<Required<Branch.branchID>>>>
+                    .Select(Base, row.BranchID);
+
+                if (organization == null)
+                {
+                    throw new PXException("Could not resolve the parent Company for the selected branch.");
+                }
+
+                string companyCode = organization.OrganizationCD.Trim();
+
+                // Call Acumatica's native subsequence engine to fetch the next number assigned to this Branch
+                // Assumes your Numbering Sequence ID is explicitly configured as 'FACOUNTER'
+                string nextSeqNumber = PX.Objects.CS.AutoNumberAttribute.GetNextNumber(Base, "FACOUNTER", row.BranchID, Base.Accessinfo.BusinessDate);
+
+                if (string.IsNullOrEmpty(nextSeqNumber))
+                {
+                    throw new PXException("Could not generate a sequence number. Ensure 'FACOUNTER' has a valid subsequence row mapped for Branch ID {0}.", row.BranchID);
+                }
+
+                // Force pad the sequence to 10 digits just in case the setup sequence differs
+                if (nextSeqNumber.Length < 10)
+                {
+                    nextSeqNumber = nextSeqNumber.PadLeft(10, '0');
+                }
+
+                // Stitch the 2-digit Company Code + Separator + 10-digit counter together
+                row.AssetCD = string.Format("{0}-{1}", companyCode, nextSeqNumber);
+            }
+        }
+    }
+}
+      ]]></TemplateCode>
+    </GraphExtension>
+  </Project>
+</CustomizationPlugin>

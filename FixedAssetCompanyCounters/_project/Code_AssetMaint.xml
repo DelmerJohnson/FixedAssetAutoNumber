@@ -1,0 +1,72 @@
+﻿<Graph ClassName="AssetMaint" Source="#CDATA" IsNew="True" FileType="ExistingGraph">
+    <CDATA name="Source"><![CDATA[using PX.Data;
+using PX.Objects.FA;
+using PX.Objects.GL;
+using PX.Objects.CR;
+using System;
+
+namespace PX.Objects.FA
+{
+    public class AssetMaint_CompanyCounterExt : PXGraphExtension<AssetMaint>
+    {
+        public static bool IsActive() => true;
+
+        protected virtual void _(Events.RowPersisted<FixedAsset> e)
+        {
+            var row = e.Row;
+            if (row == null) return;
+            if (e.TranStatus != PXTranStatus.Open) return;
+
+            // Only touch rows that just got a bare, un-prefixed number from the native FACOUNTER numbering
+            if (string.IsNullOrEmpty(row.AssetCD) || row.AssetCD.Contains("-")) return;
+            if (row.BranchID == null) return;
+
+            string companyCode = ResolveCompanyCode(row.BranchID);
+            string bareNumber = row.AssetCD.Trim().PadLeft(10, '0');
+            string finalCD = string.Format("{0}-{1}", companyCode, bareNumber);
+
+            PXDatabase.Update<FixedAsset>(
+                new PXDataFieldAssign<FixedAsset.assetCD>(finalCD),
+                new PXDataFieldRestrict<FixedAsset.assetID>(row.AssetID)
+            );
+
+            e.Cache.SetValue<FixedAsset.assetCD>(row, finalCD);
+        }
+
+        private string ResolveCompanyCode(int? branchID)
+        {
+            PX.Objects.GL.Branch branch = PXSelect<PX.Objects.GL.Branch,
+                Where<PX.Objects.GL.Branch.branchID, Equal<Required<PX.Objects.GL.Branch.branchID>>>>
+                .Select(Base, branchID);
+
+            string companyCode = null;
+
+            if (branch?.OrganizationID != null)
+            {
+                PX.Objects.GL.DAC.Organization org = PXSelect<PX.Objects.GL.DAC.Organization,
+                    Where<PX.Objects.GL.DAC.Organization.organizationID, Equal<Required<PX.Objects.GL.DAC.Organization.organizationID>>>>
+                    .Select(Base, branch.OrganizationID);
+
+                if (org?.BAccountID != null)
+                {
+                    PX.Objects.CR.BAccount bAccount = PXSelect<PX.Objects.CR.BAccount,
+                        Where<PX.Objects.CR.BAccount.bAccountID, Equal<Required<PX.Objects.CR.BAccount.bAccountID>>>>
+                        .Select(Base, org.BAccountID);
+
+                    companyCode = bAccount?.TaxRegistrationID?.Trim();
+                }
+            }
+
+            if (string.IsNullOrEmpty(companyCode) || companyCode.Length != 2)
+            {
+                var branchCD = PXAccess.GetBranch(branchID)?.BranchCD?.Trim();
+                companyCode = (!string.IsNullOrEmpty(branchCD) && branchCD.Length >= 2)
+                    ? branchCD.Substring(0, 2).ToUpper()
+                    : "FA";
+            }
+
+            return companyCode;
+        }
+    }
+}]]></CDATA>
+</Graph>
