@@ -8,8 +8,8 @@ namespace PX.Objects.FA
     {
         public static bool IsActive() => true;
 
-        [PXMergeAttributes(Method = MergeMethod.Replace)]
-        [FACompanyPrefixAutoNumber(typeof(FASetup.assetNumberingID), typeof(AccessInfo.businessDate))]
+        [PXMergeAttributes(Method = MergeMethod.Merge)]
+        [FACompanyPrefixAutoNumber]
         protected virtual void FixedAsset_AssetCD_CacheAttached(PXCache sender) { }
 
         protected virtual void _(Events.RowSelected<FixedAsset> e)
@@ -17,13 +17,13 @@ namespace PX.Objects.FA
             var row = e.Row;
             if (row?.BranchID == null) return;
             if (!string.IsNullOrEmpty(row.AssetCD) && row.AssetCD.Trim() != "<NEW>") return; // already numbered
-    
+
             if (!FACompanyPrefixAutoNumberAttribute.TryResolveCompanyCode(Base, row.BranchID, out var unusedCache, out string errorMessage))
             {
                 e.Cache.RaiseExceptionHandling<FixedAsset.branchID>(row, row.BranchID,
                     new PXSetPropertyException(errorMessage, PXErrorLevel.Warning));
             }
         }
-   }
+    }
 }]]></CDATA>
 </Graph>

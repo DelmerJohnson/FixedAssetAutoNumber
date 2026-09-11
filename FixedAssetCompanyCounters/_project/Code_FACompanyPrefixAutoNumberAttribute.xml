@@ -6,74 +6,68 @@ using PX.Objects.GL.DAC;
 
 namespace PX.Objects.FA
 {
-    public class FACompanyPrefixAutoNumberAttribute : PX.Objects.CS.AutoNumberAttribute
+    // Not an AutoNumberAttribute anymore: it never draws its own number from the
+    // numbering sequence. The base FA AssetCD attribute (already on the field, kept
+    // via PXMergeAttributes Merge) does the actual numbering. This attribute is
+    // appended after it and only reformats the bare number it already produced.
+    public class FACompanyPrefixAutoNumberAttribute : PXEventSubscriberAttribute, IPXRowPersistingSubscriber
     {
-        public FACompanyPrefixAutoNumberAttribute(Type numberingIdField, Type dateField)
-            : base(numberingIdField, dateField)
+        public void RowPersisting(PXCache sender, PXRowPersistingEventArgs e)
         {
+            if (e.Operation != PXDBOperation.Insert) return;
+
+            var row = (FixedAsset)e.Row;
+            string bareNumber = row.AssetCD;
+
+            if (string.IsNullOrEmpty(bareNumber) || bareNumber.Trim() == "<NEW>" || bareNumber.Contains("-"))
+                return; // base numbering hasn't produced a value yet, or this row is already prefixed
+
+            string companyCode = ResolveCompanyCode(sender.Graph, row.BranchID);
+            sender.SetValue<FixedAsset.assetCD>(e.Row, string.Format("{0}-{1}", companyCode, bareNumber.PadLeft(10, '0')));
         }
 
-        public override void RowPersisting(PXCache sender, PXRowPersistingEventArgs e)
-{
-    var row = (FixedAsset)e.Row;
-    bool needsNumber = e.Operation == PXDBOperation.Insert
-        && (string.IsNullOrEmpty(row.AssetCD) || row.AssetCD.Trim() == "<NEW>");
+        private static string ResolveCompanyCode(PXGraph graph, int? branchID)
+        {
+            if (!TryResolveCompanyCode(graph, branchID, out string companyCode, out string errorMessage))
+            {
+                throw new PXException(errorMessage);
+            }
+            return companyCode;
+        }
 
-    base.RowPersisting(sender, e);
+        internal static bool TryResolveCompanyCode(PXGraph graph, int? branchID, out string companyCode, out string errorMessage)
+        {
+            companyCode = null;
+            errorMessage = null;
 
-    if (!needsNumber) return;
+            if (branchID == null)
+            {
+                errorMessage = "A Branch must be selected on the asset before generating the Asset ID.";
+                return false;
+            }
 
-    var persistedRow = (FixedAsset)e.Row;
-    string bareNumber = persistedRow.AssetCD;
+            PX.Objects.GL.Branch branch = PXSelect<PX.Objects.GL.Branch,
+                Where<PX.Objects.GL.Branch.branchID, Equal<Required<PX.Objects.GL.Branch.branchID>>>>
+                .Select(graph, branchID);
 
-    if (string.IsNullOrEmpty(bareNumber) || bareNumber.Contains("-")) return;
+            Organization org = branch?.OrganizationID == null ? null :
+                PXSelect<Organization,
+                    Where<Organization.organizationID, Equal<Required<Organization.organizationID>>>>
+                    .Select(graph, branch.OrganizationID);
 
-    string companyCode = ResolveCompanyCode(sender.Graph, persistedRow.BranchID);
-    sender.SetValue<FixedAsset.assetCD>(e.Row, string.Format("{0}-{1}", companyCode, bareNumber.PadLeft(10, '0')));
-}
+            companyCode = org?.GetExtension<OrganizationExt>()?.UsrFACompanyCode?.Trim();
 
-private static string ResolveCompanyCode(PXGraph graph, int? branchID)
-{
-    if (!TryResolveCompanyCode(graph, branchID, out string companyCode, out string errorMessage))
-    {
-        throw new PXException(errorMessage);
-    }
-    return companyCode;
-}
+            if (string.IsNullOrEmpty(companyCode) || companyCode.Length != 2)
+            {
+                errorMessage = string.Format(
+                    "FA Company Code is not configured for organization '{0}'. Set a 2-character Company Code before creating fixed assets for this branch.",
+                    org?.OrganizationCD ?? branchID.ToString());
+                return false;
+            }
 
-internal static bool TryResolveCompanyCode(PXGraph graph, int? branchID, out string companyCode, out string errorMessage)
-{
-    companyCode = null;
-    errorMessage = null;
-
-    if (branchID == null)
-    {
-        errorMessage = "A Branch must be selected on the asset before generating the Asset ID.";
-        return false;
-    }
-
-    PX.Objects.GL.Branch branch = PXSelect<PX.Objects.GL.Branch,
-        Where<PX.Objects.GL.Branch.branchID, Equal<Required<PX.Objects.GL.Branch.branchID>>>>
-        .Select(graph, branchID);
-
-    Organization org = branch?.OrganizationID == null ? null :
-        PXSelect<Organization,
-            Where<Organization.organizationID, Equal<Required<Organization.organizationID>>>>
-            .Select(graph, branch.OrganizationID);
-
-    companyCode = org?.GetExtension<OrganizationExt>()?.UsrFACompanyCode?.Trim();
-
-    if (string.IsNullOrEmpty(companyCode) || companyCode.Length != 2)
-    {
-        errorMessage = string.Format(
-            "FA Company Code is not configured for organization '{0}'. Set a 2-character Company Code before creating fixed assets for this branch.",
-            org?.OrganizationCD ?? branchID.ToString());
-        return false;
-    }
-
-    companyCode = companyCode.ToUpper();
-    return true;
-}
+            companyCode = companyCode.ToUpper();
+            return true;
+        }
     }
 }]]></CDATA>
 </Graph>

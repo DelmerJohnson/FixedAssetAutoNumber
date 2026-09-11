@@ -1,0 +1,7 @@
+﻿<DAC type="PX.Objects.GL.DAC.Organization">
+    <Field FieldName="UsrFACompanyCode" TypeName="string" MapDbTable="Organization" TextAttributes="#CDATA" StorageName="AddColumn">
+        <CDATA name="TextAttributes"><![CDATA[[PXDBString(2)]
+[PXUIField(DisplayName="FA Company Code")]
+]]></CDATA>
+    </Field>
+</DAC>
